@@ -1,9 +1,10 @@
 # Local Terraform state
-**/.tfstate*
-**/.tfstate
+oci/config/.tfstate*
+aws/config/.tfstate*
 
 # .tfvars files often contain secrets and should be ignored
-*.tfvars
+oci/config/*.tfvars
+aws/config/*.tfvars
 
 # All .terraform directories, wherever they are
 **/.terraform/
@@ -12,13 +13,5 @@
 # The provider lock file
 .terraform.lock.hcl
 
-oci/terra*
-
-
-# Crash log files
-crash.log
-
-# Ignore OS-specific files
-.DS_Store
-Thumbs.db
-# Comment
+oci/.terra*
+aws/.terra*
