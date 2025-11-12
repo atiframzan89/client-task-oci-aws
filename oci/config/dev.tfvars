@@ -16,3 +16,4 @@ ubuntu_version      = "22.04" # change to 20.04 or other if desired
 ubuntu_image_ocid   = "ocid1.image.oc1.me-jeddah-1.aaaaaaaamyrrhzslsckbabcfnzmoav7yjpg4b3v2tw4cu4a56afppko4lc7a"
 compartment-ocid    = "ocid1.compartment.oc1..aaaaaaaa5oduzs3j2lq6jlcgblqevzc4cc6floafcx2ba5gue5syqqjdjl5a"
 environment         = "dev"
+# comment
