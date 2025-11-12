@@ -1,10 +1,10 @@
 # Local Terraform state
-oci/config/.tfstate*
-aws/config/.tfstate*
+./oci/config/.tfstate*
+./aws/config/.tfstate*
 
 # .tfvars files often contain secrets and should be ignored
-oci/config/*.tfvars
-aws/config/*.tfvars
+./oci/config/*.tfvars
+./aws/config/*.tfvars
 
 # All .terraform directories, wherever they are
 **/.terraform/
@@ -13,5 +13,5 @@ aws/config/*.tfvars
 # The provider lock file
 .terraform.lock.hcl
 
-oci/.terra*
-aws/.terra*
+./oci/.terra*
+./aws/.terra*
