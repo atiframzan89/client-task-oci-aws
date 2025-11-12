@@ -1,0 +1,485 @@
+################### NEW CODE ###########################
+## Copyright (c) 2021, Oracle and/or its affiliates.
+## All rights reserved. The Universal Permissive License (UPL), Version 1.0 as shown at http://oss.oracle.com/licenses/upl
+
+
+# Look up existing DRG by display name
+data "oci_core_drgs" "existing_drg" {
+  compartment_id = var.compartment_ocid
+  filter {
+    name   = "display_name"
+    values = ["DRG"]
+  }
+  # display_name   = "DRG"
+}
+
+locals {
+  existing_drg_id = data.oci_core_drgs.existing_drg.drgs[0].id
+}
+
+resource "oci_core_vcn" "hub" {
+  cidr_block     = "10.0.0.0/16"
+  dns_label      = "hub"
+  compartment_id = var.compartment_ocid
+  display_name   = "hub-vcn-${var.release}"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+# resource "oci_core_drg" "hub_drg" {
+#   count          = local.existing_drg_id ? 1 : 0
+#   compartment_id = var.compartment_ocid
+#   display_name   = var.hub_drg_display_name
+#   defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+# }
+
+resource "oci_core_drg_attachment" "hub_drg_attachment" {
+  # count        = local.existing_drg_id ? 1 : 0
+  count = local.existing_drg_id != "" ? 1 : 0
+  # drg_id       = oci_core_drg.hub_drg[0].id
+  drg_id = local.existing_drg_id
+  vcn_id       = oci_core_vcn.hub.id
+  display_name = "hub_drg_attachment-${var.release}"
+}
+
+#IGW
+resource "oci_core_internet_gateway" "hub_internet_gateway" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.hub.id
+  enabled        = "true"
+  display_name   = "IGW_HUB"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+#Default route table hub
+resource "oci_core_default_route_table" "hub_default_route_table" {
+  manage_default_resource_id = oci_core_vcn.hub.default_route_table_id
+  route_rules {
+    network_entity_id = oci_core_internet_gateway.hub_internet_gateway.id
+    destination       = "0.0.0.0/0"
+    destination_type  = "CIDR_BLOCK"
+  }
+  route_rules {
+    network_entity_id = oci_core_local_peering_gateway.hub_spoke01_local_peering_gateway.id
+    # destination       = var.spoke01_vcn_cidr_block
+    destination = oci_core_vcn.spoke01.cidr_block
+    destination_type  = "CIDR_BLOCK"
+  }
+  
+  # route_rules {
+  #   network_entity_id = oci_core_local_peering_gateway.hub_spoke02_local_peering_gateway.id
+  #   destination       = var.spoke02_vcn_cidr_block
+  #   destination_type  = "CIDR_BLOCK"
+  # }
+  defined_tags = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+# Peering connections to the spokes
+resource "oci_core_local_peering_gateway" "hub_spoke01_local_peering_gateway" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.hub.id
+  display_name   = "hub_spoke01"
+  peer_id        = oci_core_local_peering_gateway.spoke01_hub_local_peering_gateway.id
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+# resource "oci_core_local_peering_gateway" "hub_spoke02_local_peering_gateway" {
+#   compartment_id = var.compartment_ocid
+#   vcn_id         = oci_core_vcn.hub.id
+#   display_name   = "hub_spoke02"
+#   peer_id        = oci_core_local_peering_gateway.spoke02_hub_local_peering_gateway.id
+#   defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+# }
+#Hub pub subnet
+resource "oci_core_subnet" "hub_subnet_pub01" {
+  cidr_block     = "10.0.1.0/24"
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.hub.id
+  display_name   = "hub-public-subnet-${var.release}"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+
+# SPOKE Config
+## Copyright (c) 2021, Oracle and/or its affiliates.
+## All rights reserved. The Universal Permissive License (UPL), Version 1.0 as shown at http://oss.oracle.com/licenses/upl
+
+
+resource "oci_identity_tag_namespace" "ArchitectureCenterTagNamespace" {
+  # Replace with the appropriate compartment OCID
+  compartment_id = var.compartment_ocid
+  name           = "ArchitectureCenterTagNamespace" # Customize as needed
+  description    = "Tag namespace for Architecture Center deployments"
+  is_retired     = false
+}
+
+resource "oci_identity_tag" "ArchitectureCenterTag" {
+  # Replace with the appropriate compartment OCID
+  # compartment_id    = var.compartment_ocid
+  tag_namespace_id  = oci_identity_tag_namespace.ArchitectureCenterTagNamespace.id
+  name              = "ArchitectureCenterTag" # Customize as needed
+  description       = "Tag for tracking Architecture Center resources"
+  is_retired        = false
+}
+
+resource "oci_core_vcn" "spoke01" {
+  cidr_block     = "11.0.0.0/16"
+  dns_label      = "spoke01"
+  compartment_id = var.compartment_ocid
+  display_name   = "spoke-vcn-${var.release}"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+  # ADD THIS BLOCK
+  depends_on = [
+    oci_identity_tag_namespace.ArchitectureCenterTagNamespace,
+    oci_identity_tag.ArchitectureCenterTag,
+  ]
+}
+
+#LPG Spoke-HUB
+resource "oci_core_local_peering_gateway" "spoke01_hub_local_peering_gateway" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.spoke01.id
+  display_name   = "spoke01_hub_lpg"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+  # ADD THIS BLOCK
+  depends_on = [
+    oci_identity_tag_namespace.ArchitectureCenterTagNamespace,
+    oci_identity_tag.ArchitectureCenterTag,
+  ]
+}
+
+#Default route table spoke01
+resource "oci_core_default_route_table" "spoke01_default_route_table" {
+  manage_default_resource_id = oci_core_vcn.spoke01.default_route_table_id
+  
+  # Route to Nat Gateway
+  route_rules {
+    network_entity_id = oci_core_nat_gateway.spoke01_nat_gateway.id
+    destination       = "0.0.0.0/0"
+    destination_type  = "CIDR_BLOCK"
+  }
+  route_rules {
+    network_entity_id = oci_core_local_peering_gateway.spoke01_hub_local_peering_gateway.id
+    # destination       = "0.0.0.0/0"
+    destination = oci_core_vcn.hub.cidr_block
+    destination_type  = "CIDR_BLOCK"
+  }
+  defined_tags = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+resource "oci_core_subnet" "spoke01_subnet_priv01" {
+  # cidr_block     = var.spoke01_subnet_priv01_cidr_block
+  cidr_block = "11.0.1.0/24"
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.spoke01.id
+  display_name   = "spoke-private-subnet-${var.release}"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+
+# Nat Gateway Config
+# 🌐 NAT Gateway for Spoke VCN
+resource "oci_core_nat_gateway" "spoke01_nat_gateway" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.spoke01.id
+  display_name   = "spoke01-nat-gateway-${var.release}"
+  defined_tags   = { "${oci_identity_tag_namespace.ArchitectureCenterTagNamespace.name}.${oci_identity_tag.ArchitectureCenterTag.name}" = var.release }
+}
+
+# Instances
+
+data "oci_identity_availability_domains" "ads" {
+  compartment_id = var.compartment_ocid
+}
+
+data "oci_core_images" "ubuntu" {
+  compartment_id          = var.compartment_ocid
+  operating_system         = "Canonical Ubuntu"
+  operating_system_version = "20.04"
+  sort_by                  = "TIMECREATED"
+  sort_order               = "DESC"
+}
+
+locals {
+  ubuntu_image = data.oci_core_images.ubuntu.images[0].id
+  ad_name      = data.oci_identity_availability_domains.ads.availability_domains[0].name
+}
+
+# Spoke Instance NSG
+
+resource "oci_core_network_security_group" "spoke_instance_nsg" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.spoke01.id
+  display_name   = "spoke-instance-nsg"
+}
+
+resource "oci_core_network_security_group_security_rule" "spoke_egress_all" {
+  network_security_group_id = oci_core_network_security_group.spoke_instance_nsg.id
+  direction                 = "EGRESS"
+  protocol                  = "all" # Any protocol for flexibility
+  stateless                 = false # Must be stateful so return traffic is allowed
+  destination               = "0.0.0.0/0"
+  destination_type          = "CIDR_BLOCK"
+  description               = "Allow all outbound traffic"
+}
+
+resource "oci_core_network_security_group_security_rule" "spoke_ingress_all" {
+  network_security_group_id = oci_core_network_security_group.spoke_instance_nsg.id
+  direction = "INGRESS"
+  protocol  = "all"
+  source    = "0.0.0.0/0"
+  # direction                 = "INGRESS"
+  # protocol                  = "all" # Any protocol for flexibility
+  # stateless                 = false # Must be stateful so return traffic is allowed
+  # destination               = "0.0.0.0/0"
+  # destination_type          = "CIDR_BLOCK"
+  # description               = "Allow all outbound traffic"
+}
+
+
+# Mysql Port to allow for spoke instance
+# resource "oci_core_network_security_group_security_rule" "spoke_mysql_ingress" {
+#   network_security_group_id = oci_core_network_security_group.spoke_instance_nsg.id
+#   direction                 = "INGRESS"
+#   protocol                  = "all" # Any protocol for flexibility
+#   stateless                 = false # Must be stateful so return traffic is allowed
+#   destination               = "0.0.0.0/0"
+#   destination_type          = "CIDR_BLOCK"
+#   description               = "Allow all outbound traffic"
+# }
+
+resource "oci_core_instance" "hub_instance" {
+  compartment_id      = var.compartment_ocid
+  availability_domain = local.ad_name
+  display_name        = "hub-instance"
+  shape               = "VM.Standard.E2.1.Micro"
+
+  # shape_config {
+  #   ocpus         = 1
+  #   memory_in_gbs = 8
+  # }
+
+  create_vnic_details {
+    subnet_id          = oci_core_subnet.hub_subnet_pub01.id
+    assign_public_ip   = true
+    # nsg_ids            = [oci_core_network_security_group.hub_nsg.id]
+  }
+
+  source_details {
+    source_type = "image"
+    source_id   = local.ubuntu_image
+  }
+
+  metadata = {
+    ssh_authorized_keys = var.ssh_public_key
+  }
+}
+
+resource "oci_core_instance" "spoke_instance" {
+  compartment_id      = var.compartment_ocid
+  availability_domain = local.ad_name
+  display_name        = "spoke-instance"
+  shape               = "VM.Standard.E2.1.Micro"
+
+  # shape_config {
+  #   ocpus         = 1
+  #   memory_in_gbs = 8
+  # }
+
+  create_vnic_details {
+    subnet_id        = oci_core_subnet.spoke01_subnet_priv01.id
+    assign_public_ip = false
+    # nsg_ids          = [oci_core_network_security_group.spoke_nsg.id]
+    nsg_ids = [ oci_core_network_security_group.spoke_instance_nsg.id ]
+  }
+
+  source_details {
+    source_type = "image"
+    source_id   = local.ubuntu_image
+  }
+
+  metadata = {
+    ssh_authorized_keys = var.ssh_public_key
+  }
+}
+
+# RDS
+
+locals {
+  nsg-id = oci_core_network_security_group.mysql_nsg.id
+}
+
+resource "oci_core_network_security_group" "mysql_nsg" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.spoke01.id # Reference the VCN where your DB System subnet is
+  display_name   = "mysql-db-system-nsg"
+}
+
+resource "oci_core_network_security_group_security_rule" "mysql_ingress_from_hub" {
+  network_security_group_id = oci_core_network_security_group.mysql_nsg.id
+  
+  direction = "INGRESS"
+  protocol  = "all"
+  source    = "0.0.0.0/0"# direction                 = "INGRESS"
+  # protocol                  = "all" # Any protocol for flexibility
+  # stateless                 = false # Must be stateful so return traffic is allowed
+  # destination               = "0.0.0.0/0"
+  # destination_type          = "CIDR_BLOCK"
+  # description               = "Allow all outbound traffic"
+  # direction                 = "INGRESS"
+  # protocol                  = "6" # TCP protocol number
+  # stateless                 = false
+
+  # # Source: The entire CIDR block of the Hub VCN
+  # source                    = oci_core_vcn.spoke01.cidr_block
+  # source_type               = "CIDR_BLOCK"
+
+  # Destination: MySQL standard port
+  # tcp_options {
+  #   destination_port_range {
+  #     max = 3306
+  #     min = 3306
+  #   }
+  # }
+  # description = "Allow MySQL traffic from Hub VCN"
+}
+
+resource "random_password" "mysql_admin_password" {
+  length           = 16  # Use a good length, OCI min is 8
+  special          = true
+  override_special = "!@#-_" # OCI only allows _, #, or - (I've added ! and @ for strength, but be careful)
+  numeric          = true
+  upper            = true
+  lower            = true
+}
+
+resource "oci_mysql_mysql_db_system" "mysql_db_system" {
+  # Required arguments
+  availability_domain = local.ad_name
+  compartment_id      = var.compartment_ocid
+  shape_name          = "MySQL.VM.Standard.E3.1.8GB"
+  subnet_id           = oci_core_subnet.spoke01_subnet_priv01.id # Reference to your pre-existing or created subnet
+  
+  
+  
+  nsg_ids = [ local.nsg-id ]
+  # Admin User Configuration
+  admin_username = "adminuser"
+  admin_password = random_password.mysql_admin_password.result
+
+  # Optional arguments for configuration
+  display_name = "MyMdsDbSystem"
+  description  = "A test MySQL DB System deployed with Terraform"
+  
+}
+
+resource "oci_core_default_security_list" "default_security_list" {
+  manage_default_resource_id = oci_core_vcn.spoke01.default_security_list_id
+
+  # Allow all ingress from within the VCN CIDR
+  ingress_security_rules {
+    protocol    = "all"
+    source      = oci_core_vcn.spoke01.cidr_block
+    source_type = "CIDR_BLOCK"
+    description = "Allow all inbound traffic within VCN"
+  }
+
+  # Allow all egress to anywhere (optional)
+  egress_security_rules {
+    protocol         = "all"
+    destination      = "0.0.0.0/0"
+    destination_type = "CIDR_BLOCK"
+    description      = "Allow all outbound traffic"
+  }
+}
+
+
+# # OKE Configuration
+# # -----------------------------
+# # OKE Cluster
+# # -----------------------------
+
+# resource "oci_containerengine_cluster" "oke_cluster" {
+#   compartment_id = var.compartment_ocid
+#   name           = "my-oke-cluster"
+#   vcn_id         = oci_core_vcn.spoke01.id
+#   kubernetes_version = "v1.29.1" # check latest versions in OCI
+
+#   endpoint_config {
+#     is_public_ip_enabled = true
+#     subnet_id            = oci_core_subnet.spoke01_subnet_priv01.id
+#   }
+
+#   options {
+#     service_lb_subnet_ids = [oci_core_subnet.oke_subnet_public.id]
+#   }
+# }
+
+# # -----------------------------
+# # Node Pool
+# # -----------------------------
+
+# resource "oci_containerengine_node_pool" "oke_node_pool" {
+#   cluster_id     = oci_containerengine_cluster.oke_cluster.id
+#   compartment_id = var.compartment_ocid
+#   name           = "oke-nodepool"
+
+#   kubernetes_version = oci_containerengine_cluster.oke_cluster.kubernetes_version
+#   node_shape         = "VM.Standard.E4.Flex"
+
+#   node_shape_config {
+#     ocpus = 2
+#     memory_in_gbs = 16
+#   }
+
+#   node_config_details {
+#     size = 2
+#     placement_configs {
+#       # availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+#       availability_domain = local.ad_name
+#       subnet_id           = oci_core_subnet.oke_subnet_private.id
+#     }
+#   }
+
+#   node_source_details {
+#     source_type = "image"
+#     image_id    = data.oci_containerengine_node_pool_option.oke_options.sources[0].image_id
+#   }
+# }
+
+# # -----------------------------
+# # Data Sources
+# # -----------------------------
+
+# # data "oci_identity_availability_domains" "ads" {
+# #   compartment_id = var.compartment_ocid
+# # }
+
+# data "oci_containerengine_node_pool_option" "oke_options" {
+#   compartment_id = var.compartment_ocid
+#   node_pool_option_id = oci_containerengine_cluster.oke_cluster.id
+# }
+
+
+
+
+output "mysql_db_system_ip_address" {
+  description = "The IP address of the MySQL DB System's endpoint"
+  value       = oci_mysql_mysql_db_system.mysql_db_system.ip_address
+}
+
+#OUTPUTs
+output "hub-instance-public-ip" {
+  value = oci_core_instance.hub_instance.public_ip
+}
+
+output "spoke-instance-private-ip" {
+  value = oci_core_instance.spoke_instance.private_ip
+}
+
+output "admin-password" {
+  value = random_password.mysql_admin_password.result
+  sensitive = true
+}
+
+output "mysql-endpoint" {
+  value = oci_mysql_mysql_db_system.mysql_db_system.endpoints
+}
