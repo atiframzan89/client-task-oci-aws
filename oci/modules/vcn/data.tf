@@ -10,3 +10,8 @@ data "oci_core_images" "ubuntu" {
   sort_by                  = "TIMECREATED"
   sort_order               = "DESC"
 }
+
+data "oci_identity_fault_domains" "fault-domain" {
+  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+  compartment_id = var.compartment-ocid
+}

@@ -46,3 +46,7 @@ output "mysql-admin-password" {
 output "mysql-db-ip" {
   value = module.rds.mysql-db-ip
 }
+
+output "jenkins-ip" {
+  value = module.vcn.jenkins-public-ip
+}

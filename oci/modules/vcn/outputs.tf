@@ -17,3 +17,7 @@ output "public-subnet-id" {
 output "private-subnet-id" {
   value = oci_core_subnet.private-subnet.id
 }
+
+output "jenkins-public-ip" {
+  value = oci_core_instance.jenkins-instance.public_ip
+}

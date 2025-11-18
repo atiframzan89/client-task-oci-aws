@@ -55,7 +55,8 @@ resource "oci_core_subnet" "public-subnet" {
   display_name               = "${var.customer}-public-subnet-1-${var.environment}"
   prohibit_public_ip_on_vnic = false
   route_table_id             = oci_core_route_table.public-rt.id
-  security_list_ids          = [oci_core_vcn.customer-vcn.default_security_list_id]
+  # security_list_ids          = [oci_core_vcn.customer-vcn.default_security_list_id]
+  security_list_ids         = [oci_core_security_list.public-sl.id]
   dns_label                  = "public"
 }
 
@@ -109,6 +110,41 @@ resource "oci_core_security_list" "private-sl" {
     protocol    = "all"
     source      = "0.0.0.0/0"
     description = "Allow all outbound traffic"
+  }
+}
+
+resource "oci_core_security_list" "public-sl" {
+  compartment_id = var.compartment-ocid
+  vcn_id         = oci_core_vcn.customer-vcn.id
+  display_name   = "${var.customer}-public-sl-${var.environment}"
+
+  # Allow all outbound traffic
+  egress_security_rules {
+    protocol    = "all"
+    destination = "0.0.0.0/0"
+    description = "Allow all outbound traffic"
+  }
+
+  # Allow SSH from anywhere
+  ingress_security_rules {
+    protocol = "6" // TCP
+    source   = "0.0.0.0/0"
+    tcp_options {
+      min = 22
+      max = 22
+    }
+    description = "Allow SSH from anywhere"
+  }
+
+  # Allow Jenkins from anywhere
+  ingress_security_rules {
+    protocol = "6" // TCP
+    source   = "0.0.0.0/0"
+    tcp_options {
+      min = 8080
+      max = 8080
+    }
+    description = "Allow Jenkins from anywhere"
   }
 }
 
@@ -166,12 +202,47 @@ resource "oci_core_instance" "private-instance" {
   metadata = {
     ssh_authorized_keys = var.ssh-public-key
     user_data = base64encode(templatefile("${path.module}/templates/private-instance.sh", {
-      # This is where we pass variables into the template
       cluster-id = "${var.oke-cluster-id}"
       region     = "${var.region}"
     }))
   }
 }
+
+# jenkins Instance
+resource "oci_core_instance" "jenkins-instance" {
+  compartment_id      = var.compartment-ocid
+  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+  display_name        = "${var.customer}-jenkins-instance-${var.environment}"
+  # shape               = "VM.Standard.E2.1.Micro"
+  shape               = "VM.Standard.E4.Flex"
+  fault_domain        = "FAULT-DOMAIN-1"
+
+  shape_config {
+    ocpus         = 1
+    memory_in_gbs = 2
+  }
+
+  create_vnic_details {
+    subnet_id          = oci_core_subnet.public-subnet.id
+    assign_public_ip   = true
+    nsg_ids            = [ oci_core_network_security_group.instance-sg.id ]
+    # nsg_ids            = [oci_core_network_security_group.hub_nsg.id]
+  }
+
+  source_details {
+    source_type = "image"
+    source_id   = data.oci_core_images.ubuntu.images[0].id
+  }
+
+  metadata = {
+    ssh_authorized_keys = var.ssh-public-key
+    user_data = base64encode(templatefile("${path.module}/templates/jenkins.sh", {
+      cluster-id = "${var.oke-cluster-id}"
+      region     = "${var.region}"
+    }))
+  }
+  }
+
 
 resource "oci_core_network_security_group" "instance-sg" {
   compartment_id = var.compartment-ocid
@@ -189,9 +260,25 @@ resource "oci_core_network_security_group_security_rule" "egress-all" {
   description               = "Allow all outbound traffic"
 }
 
-resource "oci_core_network_security_group_security_rule" "ingress-all" {
+resource "oci_core_network_security_group_security_rule" "ingress-jenkins-8080" {
   network_security_group_id = oci_core_network_security_group.instance-sg.id
-  direction = "INGRESS"
-  protocol  = "all"
-  source    = "0.0.0.0/0"
+  direction                 = "INGRESS"
+  protocol                  = "6" # TCP
+  source                    = "0.0.0.0/0"
+  source_type               = "CIDR_BLOCK"
+  description               = "Allow inbound Jenkins traffic"
+  
+  tcp_options {
+    destination_port_range {
+      min = 8080
+      max = 8080
+    }
+  }
 }
+
+# resource "oci_core_network_security_group_security_rule" "ingress-all" {
+#   network_security_group_id = oci_core_network_security_group.instance-sg.id
+#   direction = "INGRESS"
+#   protocol  = "all"
+#   source    = "0.0.0.0/0"
+# }
